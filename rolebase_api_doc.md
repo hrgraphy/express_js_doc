@@ -1,17 +1,25 @@
-# 🚀 Role-Based Full CRUD API (Express.js + MongoDB + JWT)
-
-This project includes:
-
-- ✅ Express.js setup
-- ✅ MongoDB with Mongoose
-- ✅ JWT Authentication
-- ✅ Role-Based Authorization (Admin & User)
-- ✅ Full CRUD Operations
-- ✅ MVC Architecture
+# 🚀 Role-Based Full CRUD API
+## Express.js + MongoDB + JWT + MVC Architecture
 
 ---
 
-# 📦 1️⃣ Project Setup
+# 📌 Project Overview
+
+This project implements:
+
+- JWT Authentication
+- Role-Based Authorization (Admin & User)
+- Full CRUD Operations
+- Owner-Based Update Restriction
+- Password Hashing
+- Environment Variables
+- Proper Status Codes
+- MVC Architecture
+- Validation & Error Handling
+
+---
+
+# 📦 1️⃣ Project Initialization
 
 ## Step 1: Create Project
 
@@ -26,7 +34,7 @@ npm init -y
 ## Step 2: Install Dependencies
 
 ```bash
-npm install express mongoose jsonwebtoken bcryptjs cors dotenv
+npm install express mongoose bcryptjs jsonwebtoken cors dotenv
 npm install nodemon --save-dev
 ```
 
@@ -41,7 +49,7 @@ npm install nodemon --save-dev
 }
 ```
 
-Run:
+Run server:
 
 ```bash
 npm run dev
@@ -76,11 +84,12 @@ role-based-crud-api/
 
 # ⚙️ 3️⃣ Environment Variables
 
-Create `.env` file:
+Create `.env`
 
 ```
 MONGO_URL=mongodb://127.0.0.1:27017/roleCrudDB
-JWT_SECRET=mysecretkey
+JWT_SECRET=supersecretkey
+PORT=3000
 ```
 
 ---
@@ -106,8 +115,8 @@ mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log("MongoDB Connected"))
   .catch(err => console.log(err));
 
-app.listen(3000, () => {
-  console.log("Server running on port 3000");
+app.listen(process.env.PORT, () => {
+  console.log(`Server running on port ${process.env.PORT}`);
 });
 ```
 
@@ -121,9 +130,23 @@ app.listen(3000, () => {
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true, minlength: 6 },
+  name: {
+    type: String,
+    required: [true, "Name is required"],
+    trim: true
+  },
+  email: {
+    type: String,
+    required: [true, "Email is required"],
+    unique: true,
+    lowercase: true
+  },
+  password: {
+    type: String,
+    required: true,
+    minlength: 6,
+    select: false
+  },
   role: {
     type: String,
     enum: ["admin", "user"],
@@ -136,7 +159,7 @@ module.exports = mongoose.model("User", userSchema);
 
 ---
 
-# 🎮 6️⃣ Controller (FULL CRUD + AUTH)
+# 🎮 6️⃣ Controller (FULL CRUD + ROLE LOGIC)
 
 📁 controllers/userController.js
 
@@ -150,33 +173,39 @@ exports.register = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
 
+    const existingUser = await User.findOne({ email });
+    if (existingUser)
+      return res.status(400).json({ message: "Email already exists" });
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = new User({
+    const user = await User.create({
       name,
       email,
       password: hashedPassword,
       role
     });
 
-    await user.save();
-    res.status(201).json({ message: "User Registered" });
+    res.status(201).json({
+      message: "User Registered Successfully",
+      userId: user._id
+    });
 
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 };
 
 // LOGIN
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const user = await User.findOne({ email: req.body.email }).select("+password");
+    if (!user)
+      return res.status(404).json({ message: "User not found" });
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid password" });
+    const isMatch = await bcrypt.compare(req.body.password, user.password);
+    if (!isMatch)
+      return res.status(400).json({ message: "Invalid password" });
 
     const token = jwt.sign(
       { id: user._id, role: user.role },
@@ -184,10 +213,10 @@ exports.login = async (req, res) => {
       { expiresIn: "1h" }
     );
 
-    res.json({ token });
+    res.status(200).json({ token });
 
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 };
 
@@ -199,31 +228,38 @@ exports.createUser = async (req, res) => {
 
 // GET ALL USERS (Admin Only)
 exports.getAllUsers = async (req, res) => {
-  const users = await User.find();
-  res.json(users);
+  const users = await User.find().select("-password");
+  res.status(200).json(users);
 };
 
 // GET SINGLE USER
 exports.getUserById = async (req, res) => {
-  const user = await User.findById(req.params.id);
-  if (!user) return res.status(404).json({ message: "User not found" });
-  res.json(user);
+  const user = await User.findById(req.params.id).select("-password");
+  if (!user)
+    return res.status(404).json({ message: "User not found" });
+
+  res.status(200).json(user);
 };
 
-// UPDATE USER
+// UPDATE USER (Admin or Owner)
 exports.updateUser = async (req, res) => {
-  const user = await User.findByIdAndUpdate(
+  if (req.user.role !== "admin" && req.user.id !== req.params.id) {
+    return res.status(403).json({ message: "Access Denied" });
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(
     req.params.id,
     req.body,
     { new: true }
   );
-  res.json(user);
+
+  res.status(200).json(updatedUser);
 };
 
 // DELETE USER (Admin Only)
 exports.deleteUser = async (req, res) => {
   await User.findByIdAndDelete(req.params.id);
-  res.json({ message: "User Deleted" });
+  res.status(200).json({ message: "User Deleted Successfully" });
 };
 ```
 
@@ -239,7 +275,8 @@ const jwt = require("jsonwebtoken");
 exports.authenticate = (req, res, next) => {
   const token = req.headers.authorization;
 
-  if (!token) return res.status(401).json({ message: "Unauthorized" });
+  if (!token)
+    return res.status(401).json({ message: "Unauthorized" });
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -270,7 +307,7 @@ exports.authorize = (...roles) => {
 
 ---
 
-# 🛣 9️⃣ Routes (FULL CRUD + ROLE BASED)
+# 🛣 9️⃣ Routes
 
 📁 routes/userRoutes.js
 
@@ -285,19 +322,11 @@ const { authorize } = require("../middleware/roleMiddleware");
 router.post("/register", userController.register);
 router.post("/login", userController.login);
 
-// Admin Create User
 router.post("/", authenticate, authorize("admin"), userController.createUser);
-
-// Admin Get All Users
 router.get("/", authenticate, authorize("admin"), userController.getAllUsers);
 
-// Get Single User (Logged-in users)
 router.get("/:id", authenticate, userController.getUserById);
-
-// Update User (Admin or Owner)
 router.put("/:id", authenticate, userController.updateUser);
-
-// Delete User (Admin Only)
 router.delete("/:id", authenticate, authorize("admin"), userController.deleteUser);
 
 module.exports = router;
@@ -305,42 +334,27 @@ module.exports = router;
 
 ---
 
-# 🧪 API Testing Flow
-
-## 1️⃣ Register Admin
-
-```json
-{
-  "name": "Admin",
-  "email": "admin@gmail.com",
-  "password": "123456",
-  "role": "admin"
-}
-```
-
----
-
-## 2️⃣ Login → Copy Token
-
----
-
-## 3️⃣ Use Token in Header
-
-```
-Authorization: YOUR_TOKEN
-```
-
----
-
-# 📊 Status Codes
+# 📊 Status Codes Used
 
 | Code | Meaning |
 |------|----------|
-| 200 | OK |
+| 200 | Success |
 | 201 | Created |
+| 400 | Bad Request |
 | 401 | Unauthorized |
 | 403 | Forbidden |
 | 404 | Not Found |
 | 500 | Server Error |
+
+---
+
+# 🔍 API Testing Flow
+
+1. Register Admin
+2. Login → Copy Token
+3. Add Token in Header:
+   Authorization: YOUR_TOKEN
+4. Test Admin Routes
+5. Test User Routes
 
 ---
