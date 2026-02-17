@@ -1,13 +1,13 @@
-# 🚀 Role-Based Authentication API (Express.js + MongoDB + JWT)
+# 🚀 Role-Based Full CRUD API (Express.js + MongoDB + JWT)
 
-This project demonstrates:
+This project includes:
 
-- ✅ Express.js Server Setup
-- ✅ MongoDB Connection
-- ✅ MVC Architecture
+- ✅ Express.js setup
+- ✅ MongoDB with Mongoose
 - ✅ JWT Authentication
 - ✅ Role-Based Authorization (Admin & User)
-- ✅ Protected Routes
+- ✅ Full CRUD Operations
+- ✅ MVC Architecture
 
 ---
 
@@ -16,8 +16,8 @@ This project demonstrates:
 ## Step 1: Create Project
 
 ```bash
-mkdir role-based-api
-cd role-based-api
+mkdir role-based-crud-api
+cd role-based-crud-api
 npm init -y
 ```
 
@@ -30,18 +30,6 @@ npm install express mongoose jsonwebtoken bcryptjs cors dotenv
 npm install nodemon --save-dev
 ```
 
-### 📚 Package Explanation
-
-| Package | Purpose |
-|----------|----------|
-| express | Web framework |
-| mongoose | MongoDB ODM |
-| jsonwebtoken | JWT Authentication |
-| bcryptjs | Password hashing |
-| cors | Enable cross-origin |
-| dotenv | Environment variables |
-| nodemon | Auto restart server |
-
 ---
 
 ## Step 3: Update package.json
@@ -53,7 +41,7 @@ npm install nodemon --save-dev
 }
 ```
 
-Run server:
+Run:
 
 ```bash
 npm run dev
@@ -61,10 +49,10 @@ npm run dev
 
 ---
 
-# 📁 2️⃣ Folder Structure (MVC)
+# 📁 2️⃣ Folder Structure
 
 ```
-role-based-api/
+role-based-crud-api/
 │
 ├── models/
 │   └── User.js
@@ -91,7 +79,7 @@ role-based-api/
 Create `.env` file:
 
 ```
-MONGO_URL=mongodb://127.0.0.1:27017/roleBasedDB
+MONGO_URL=mongodb://127.0.0.1:27017/roleCrudDB
 JWT_SECRET=mysecretkey
 ```
 
@@ -133,33 +121,22 @@ app.listen(3000, () => {
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6
-  },
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true, minlength: 6 },
   role: {
     type: String,
     enum: ["admin", "user"],
     default: "user"
   }
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model("User", userSchema);
 ```
 
 ---
 
-# 🎮 6️⃣ Controller
+# 🎮 6️⃣ Controller (FULL CRUD + AUTH)
 
 📁 controllers/userController.js
 
@@ -168,6 +145,7 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+// REGISTER
 exports.register = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -189,6 +167,7 @@ exports.register = async (req, res) => {
   }
 };
 
+// LOGIN
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -212,9 +191,39 @@ exports.login = async (req, res) => {
   }
 };
 
+// CREATE USER (Admin Only)
+exports.createUser = async (req, res) => {
+  const user = await User.create(req.body);
+  res.status(201).json(user);
+};
+
+// GET ALL USERS (Admin Only)
 exports.getAllUsers = async (req, res) => {
   const users = await User.find();
   res.json(users);
+};
+
+// GET SINGLE USER
+exports.getUserById = async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) return res.status(404).json({ message: "User not found" });
+  res.json(user);
+};
+
+// UPDATE USER
+exports.updateUser = async (req, res) => {
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    { new: true }
+  );
+  res.json(user);
+};
+
+// DELETE USER (Admin Only)
+exports.deleteUser = async (req, res) => {
+  await User.findByIdAndDelete(req.params.id);
+  res.json({ message: "User Deleted" });
 };
 ```
 
@@ -252,7 +261,7 @@ exports.authenticate = (req, res, next) => {
 exports.authorize = (...roles) => {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden: Access Denied" });
+      return res.status(403).json({ message: "Forbidden" });
     }
     next();
   };
@@ -261,7 +270,7 @@ exports.authorize = (...roles) => {
 
 ---
 
-# 🛣 9️⃣ Routes
+# 🛣 9️⃣ Routes (FULL CRUD + ROLE BASED)
 
 📁 routes/userRoutes.js
 
@@ -276,30 +285,29 @@ const { authorize } = require("../middleware/roleMiddleware");
 router.post("/register", userController.register);
 router.post("/login", userController.login);
 
-// Logged-in users
-router.get("/profile", authenticate, (req, res) => {
-  res.json({ message: "User Profile", user: req.user });
-});
+// Admin Create User
+router.post("/", authenticate, authorize("admin"), userController.createUser);
 
-// Admin only
-router.get(
-  "/all",
-  authenticate,
-  authorize("admin"),
-  userController.getAllUsers
-);
+// Admin Get All Users
+router.get("/", authenticate, authorize("admin"), userController.getAllUsers);
+
+// Get Single User (Logged-in users)
+router.get("/:id", authenticate, userController.getUserById);
+
+// Update User (Admin or Owner)
+router.put("/:id", authenticate, userController.updateUser);
+
+// Delete User (Admin Only)
+router.delete("/:id", authenticate, authorize("admin"), userController.deleteUser);
 
 module.exports = router;
 ```
 
 ---
 
-# 🧪 🔍 API Testing (Postman)
+# 🧪 API Testing Flow
 
-## Register Admin
-
-POST  
-`http://localhost:3000/api/users/register`
+## 1️⃣ Register Admin
 
 ```json
 {
@@ -312,35 +320,11 @@ POST
 
 ---
 
-## Register Normal User
-
-```json
-{
-  "name": "Harmik",
-  "email": "harmik@gmail.com",
-  "password": "123456"
-}
-```
-
-(Default role = user)
+## 2️⃣ Login → Copy Token
 
 ---
 
-## Login
-
-POST  
-`http://localhost:3000/api/users/login`
-
-Copy the token.
-
----
-
-## Access Admin Route
-
-GET  
-`http://localhost:3000/api/users/all`
-
-Header:
+## 3️⃣ Use Token in Header
 
 ```
 Authorization: YOUR_TOKEN
@@ -348,14 +332,15 @@ Authorization: YOUR_TOKEN
 
 ---
 
-# 📊 Status Codes Used
+# 📊 Status Codes
 
 | Code | Meaning |
 |------|----------|
-| 200 | Success |
+| 200 | OK |
 | 201 | Created |
 | 401 | Unauthorized |
 | 403 | Forbidden |
 | 404 | Not Found |
 | 500 | Server Error |
 
+---
