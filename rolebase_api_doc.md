@@ -1,31 +1,30 @@
-# 🚀 Role-Based Full CRUD API
-## Express.js + MongoDB + JWT + MVC Architecture
+# 🚀 Role-Based Full CRUD API with Two Tables (Foreign Key Concept)
+## Express.js + MongoDB + JWT + MVC
 
 ---
 
 # 📌 Project Overview
 
-This project implements:
+This project includes:
 
-- JWT Authentication
+- User Authentication (JWT)
 - Role-Based Authorization (Admin & User)
+- Two Collections (User & Product)
+- Foreign Key Concept using ObjectId Reference
+- One-to-Many Relationship (One User → Many Products)
+- Populate() for Join-like Query
 - Full CRUD Operations
-- Owner-Based Update Restriction
-- Password Hashing
-- Environment Variables
-- Proper Status Codes
 - MVC Architecture
-- Validation & Error Handling
 
 ---
 
-# 📦 1️⃣ Project Initialization
+# 📦 1️⃣ Project Setup
 
-## Step 1: Create Project
+## Step 1: Initialize Project
 
 ```bash
-mkdir role-based-crud-api
-cd role-based-crud-api
+mkdir role-based-foreignkey-api
+cd role-based-foreignkey-api
 npm init -y
 ```
 
@@ -49,7 +48,7 @@ npm install nodemon --save-dev
 }
 ```
 
-Run server:
+Run:
 
 ```bash
 npm run dev
@@ -60,16 +59,19 @@ npm run dev
 # 📁 2️⃣ Folder Structure
 
 ```
-role-based-crud-api/
+role-based-foreignkey-api/
 │
 ├── models/
-│   └── User.js
+│   ├── User.js
+│   └── Product.js
 │
 ├── controllers/
-│   └── userController.js
+│   ├── userController.js
+│   └── productController.js
 │
 ├── routes/
-│   └── userRoutes.js
+│   ├── userRoutes.js
+│   └── productRoutes.js
 │
 ├── middleware/
 │   ├── authMiddleware.js
@@ -87,7 +89,7 @@ role-based-crud-api/
 Create `.env`
 
 ```
-MONGO_URL=mongodb://127.0.0.1:27017/roleCrudDB
+MONGO_URL=mongodb://127.0.0.1:27017/foreignKeyDB
 JWT_SECRET=supersecretkey
 PORT=3000
 ```
@@ -103,6 +105,7 @@ const cors = require("cors");
 require("dotenv").config();
 
 const userRoutes = require("./routes/userRoutes");
+const productRoutes = require("./routes/productRoutes");
 
 const app = express();
 
@@ -110,6 +113,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api/users", userRoutes);
+app.use("/api/products", productRoutes);
 
 mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log("MongoDB Connected"))
@@ -122,7 +126,7 @@ app.listen(process.env.PORT, () => {
 
 ---
 
-# 🗄 5️⃣ User Model
+# 🗄 5️⃣ User Model (Table 1)
 
 📁 models/User.js
 
@@ -130,23 +134,9 @@ app.listen(process.env.PORT, () => {
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, "Name is required"],
-    trim: true
-  },
-  email: {
-    type: String,
-    required: [true, "Email is required"],
-    unique: true,
-    lowercase: true
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6,
-    select: false
-  },
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true, select: false },
   role: {
     type: String,
     enum: ["admin", "user"],
@@ -159,109 +149,34 @@ module.exports = mongoose.model("User", userSchema);
 
 ---
 
-# 🎮 6️⃣ Controller (FULL CRUD + ROLE LOGIC)
+# 🗄 6️⃣ Product Model (Table 2 - Foreign Key Concept)
 
-📁 controllers/userController.js
+📁 models/Product.js
 
 ```js
-const User = require("../models/User");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 
-// REGISTER
-exports.register = async (req, res) => {
-  try {
-    const { name, email, password, role } = req.body;
+const productSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  price: { type: Number, required: true },
+  description: String,
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser)
-      return res.status(400).json({ message: "Email already exists" });
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const user = await User.create({
-      name,
-      email,
-      password: hashedPassword,
-      role
-    });
-
-    res.status(201).json({
-      message: "User Registered Successfully",
-      userId: user._id
-    });
-
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// LOGIN
-exports.login = async (req, res) => {
-  try {
-    const user = await User.findOne({ email: req.body.email }).select("+password");
-    if (!user)
-      return res.status(404).json({ message: "User not found" });
-
-    const isMatch = await bcrypt.compare(req.body.password, user.password);
-    if (!isMatch)
-      return res.status(400).json({ message: "Invalid password" });
-
-    const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" }
-    );
-
-    res.status(200).json({ token });
-
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// CREATE USER (Admin Only)
-exports.createUser = async (req, res) => {
-  const user = await User.create(req.body);
-  res.status(201).json(user);
-};
-
-// GET ALL USERS (Admin Only)
-exports.getAllUsers = async (req, res) => {
-  const users = await User.find().select("-password");
-  res.status(200).json(users);
-};
-
-// GET SINGLE USER
-exports.getUserById = async (req, res) => {
-  const user = await User.findById(req.params.id).select("-password");
-  if (!user)
-    return res.status(404).json({ message: "User not found" });
-
-  res.status(200).json(user);
-};
-
-// UPDATE USER (Admin or Owner)
-exports.updateUser = async (req, res) => {
-  if (req.user.role !== "admin" && req.user.id !== req.params.id) {
-    return res.status(403).json({ message: "Access Denied" });
+  // FOREIGN KEY (Reference to User)
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    required: true
   }
 
-  const updatedUser = await User.findByIdAndUpdate(
-    req.params.id,
-    req.body,
-    { new: true }
-  );
+}, { timestamps: true });
 
-  res.status(200).json(updatedUser);
-};
-
-// DELETE USER (Admin Only)
-exports.deleteUser = async (req, res) => {
-  await User.findByIdAndDelete(req.params.id);
-  res.status(200).json({ message: "User Deleted Successfully" });
-};
+module.exports = mongoose.model("Product", productSchema);
 ```
+
+📌 Explanation:
+- `createdBy` is Foreign Key
+- It stores User `_id`
+- `ref: "User"` links Product to User
 
 ---
 
@@ -307,40 +222,158 @@ exports.authorize = (...roles) => {
 
 ---
 
-# 🛣 9️⃣ Routes
+# 👤 9️⃣ User Controller (Auth)
 
-📁 routes/userRoutes.js
+📁 controllers/userController.js
+
+```js
+const User = require("../models/User");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+
+exports.register = async (req, res) => {
+  const hashedPassword = await bcrypt.hash(req.body.password, 10);
+
+  const user = await User.create({
+    name: req.body.name,
+    email: req.body.email,
+    password: hashedPassword,
+    role: req.body.role
+  });
+
+  res.status(201).json({ message: "User Registered" });
+};
+
+exports.login = async (req, res) => {
+  const user = await User.findOne({ email: req.body.email }).select("+password");
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  const isMatch = await bcrypt.compare(req.body.password, user.password);
+  if (!isMatch) return res.status(400).json({ message: "Invalid password" });
+
+  const token = jwt.sign(
+    { id: user._id, role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: "1h" }
+  );
+
+  res.json({ token });
+};
+```
+
+---
+
+# 📦 1️⃣0️⃣ Product Controller (Full CRUD + Foreign Key)
+
+📁 controllers/productController.js
+
+```js
+const Product = require("../models/Product");
+
+// CREATE PRODUCT (User creates)
+exports.createProduct = async (req, res) => {
+  const product = await Product.create({
+    name: req.body.name,
+    price: req.body.price,
+    description: req.body.description,
+    createdBy: req.user.id
+  });
+
+  res.status(201).json(product);
+};
+
+// GET ALL PRODUCTS (Populate Foreign Key)
+exports.getAllProducts = async (req, res) => {
+  const products = await Product.find()
+    .populate("createdBy", "name email role");
+
+  res.json(products);
+};
+
+// GET SINGLE PRODUCT
+exports.getProductById = async (req, res) => {
+  const product = await Product.findById(req.params.id)
+    .populate("createdBy", "name email");
+
+  res.json(product);
+};
+
+// UPDATE PRODUCT (Owner or Admin)
+exports.updateProduct = async (req, res) => {
+  const product = await Product.findById(req.params.id);
+
+  if (
+    req.user.role !== "admin" &&
+    product.createdBy.toString() !== req.user.id
+  ) {
+    return res.status(403).json({ message: "Access Denied" });
+  }
+
+  const updatedProduct = await Product.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    { new: true }
+  );
+
+  res.json(updatedProduct);
+};
+
+// DELETE PRODUCT (Admin Only)
+exports.deleteProduct = async (req, res) => {
+  await Product.findByIdAndDelete(req.params.id);
+  res.json({ message: "Product Deleted" });
+};
+```
+
+---
+
+# 🛣 1️⃣1️⃣ Routes
+
+📁 routes/productRoutes.js
 
 ```js
 const express = require("express");
 const router = express.Router();
 
-const userController = require("../controllers/userController");
+const productController = require("../controllers/productController");
 const { authenticate } = require("../middleware/authMiddleware");
 const { authorize } = require("../middleware/roleMiddleware");
 
-router.post("/register", userController.register);
-router.post("/login", userController.login);
-
-router.post("/", authenticate, authorize("admin"), userController.createUser);
-router.get("/", authenticate, authorize("admin"), userController.getAllUsers);
-
-router.get("/:id", authenticate, userController.getUserById);
-router.put("/:id", authenticate, userController.updateUser);
-router.delete("/:id", authenticate, authorize("admin"), userController.deleteUser);
+router.post("/", authenticate, productController.createProduct);
+router.get("/", authenticate, productController.getAllProducts);
+router.get("/:id", authenticate, productController.getProductById);
+router.put("/:id", authenticate, productController.updateProduct);
+router.delete("/:id", authenticate, authorize("admin"), productController.deleteProduct);
 
 module.exports = router;
 ```
 
 ---
 
-# 📊 Status Codes Used
+# 📌 Foreign Key Concept Explanation (Exam Answer)
+
+In MongoDB, Foreign Key is implemented using:
+
+```
+type: mongoose.Schema.Types.ObjectId
+ref: "ModelName"
+```
+
+It creates a relationship between two collections.
+
+One User → Many Products  
+This is One-to-Many relationship.
+
+Populate() works like SQL JOIN.
+
+---
+
+# 📊 Status Codes
 
 | Code | Meaning |
 |------|----------|
 | 200 | Success |
 | 201 | Created |
-| 400 | Bad Request |
 | 401 | Unauthorized |
 | 403 | Forbidden |
 | 404 | Not Found |
@@ -348,13 +381,4 @@ module.exports = router;
 
 ---
 
-# 🔍 API Testing Flow
-
-1. Register Admin
-2. Login → Copy Token
-3. Add Token in Header:
-   Authorization: YOUR_TOKEN
-4. Test Admin Routes
-5. Test User Routes
-
----
+🔥 Now you are 100% ready for backend exam.
